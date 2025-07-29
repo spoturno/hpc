@@ -1,0 +1,114 @@
+# Makefile for Hybrid OpenMP+MPI Chess Engine
+# Usage: make -f Makefile.hybrid
+
+# Compiler settings (macOS Homebrew compatible)
+MPICXX = mpicxx
+CXX = clang++
+CXXFLAGS = -std=c++17 -O3 -march=native -DNDEBUG -I/opt/homebrew/opt/libomp/include -Xclang -fopenmp
+LDFLAGS = -L/opt/homebrew/opt/libomp/lib -lomp
+
+# Include directories
+INCLUDES = -I. -Ilibchess
+
+# Source files
+HYBRID_SOURCES = main-hybrid.cpp search-hybrid.cpp evaluation.cpp
+LIBCHESS_DIR = libchess
+LIBCHESS_SOURCES = $(wildcard $(LIBCHESS_DIR)/*.cpp)
+
+# Object files
+HYBRID_OBJECTS = $(HYBRID_SOURCES:.cpp=.o)
+LIBCHESS_OBJECTS = $(LIBCHESS_SOURCES:.cpp=.o)
+
+# Target executable
+TARGET = engine-hybrid
+
+# Default target
+all: $(TARGET)
+
+# Build the hybrid engine
+$(TARGET): $(HYBRID_OBJECTS) $(LIBCHESS_OBJECTS)
+	$(MPICXX) $(LDFLAGS) -o $@ $^
+
+# Compile hybrid source files with MPI compiler
+main-hybrid.o: main-hybrid.cpp
+	$(MPICXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+search-hybrid.o: search-hybrid.cpp
+	$(MPICXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+evaluation.o: evaluation.cpp
+	$(MPICXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Compile libchess files
+$(LIBCHESS_DIR)/%.o: $(LIBCHESS_DIR)/%.cpp
+	$(MPICXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Test targets
+test-hybrid: $(TARGET)
+	mpirun -np 4 ./$(TARGET) 0 5
+
+test-hybrid-deep: $(TARGET)
+	mpirun -np 4 ./$(TARGET) 1 6
+
+test-hybrid-single: $(TARGET)
+	mpirun -np 1 ./$(TARGET) 0 5
+
+# Performance test
+perf-test: $(TARGET)
+	@echo "Running performance tests..."
+	@echo "1 process, 4 threads:"
+	@time mpirun -np 1 ./$(TARGET) 1 5
+	@echo "2 processes, 2 threads each:"
+	@time mpirun -np 2 ./$(TARGET) 1 5
+	@echo "4 processes, 1 thread each:"
+	@time mpirun -np 4 ./$(TARGET) 1 5
+
+# Benchmark against other implementations
+benchmark: $(TARGET)
+	@echo "Building other implementations for comparison..."
+	@make -f makefile engine-mpi || echo "MPI engine build failed"
+	@echo "Benchmarking hybrid vs sequential vs MPI..."
+	@echo "Hybrid (2 processes, multi-threaded):"
+	@time mpirun -np 2 ./$(TARGET) 1 5
+	@echo "MPI only (2 processes):"
+	@time mpirun -np 2 ./engine-mpi 1 5 || echo "MPI engine not available"
+
+# Clean build artifacts
+clean:
+	rm -f $(HYBRID_OBJECTS) $(LIBCHESS_OBJECTS) $(TARGET)
+
+# Help target
+help:
+	@echo "Hybrid OpenMP+MPI Chess Engine Makefile"
+	@echo "Available targets:"
+	@echo "  all         - Build the hybrid engine"
+	@echo "  test-hybrid - Test with 4 processes, depth 5"
+	@echo "  test-hybrid-deep - Test with 4 processes, depth 6"
+	@echo "  test-hybrid-single - Test with 1 process (OpenMP only)"
+	@echo "  perf-test   - Run performance comparison tests"
+	@echo "  benchmark   - Compare hybrid vs other implementations"
+	@echo "  clean       - Remove build artifacts"
+	@echo "  help        - Show this help message"
+	@echo ""
+	@echo "Usage examples:"
+	@echo "  make -f Makefile.hybrid"
+	@echo "  make -f Makefile.hybrid test-hybrid"
+	@echo "  mpirun -np 4 ./engine-hybrid 0 6"
+	@echo "  mpirun -np 2 --bind-to core ./engine-hybrid 1 7"
+
+# SLURM job submission example
+slurm-job:
+	@echo "#!/bin/bash" > hybrid_job.slurm
+	@echo "#SBATCH --job-name=chess-hybrid" >> hybrid_job.slurm
+	@echo "#SBATCH --nodes=2" >> hybrid_job.slurm
+	@echo "#SBATCH --ntasks-per-node=2" >> hybrid_job.slurm
+	@echo "#SBATCH --cpus-per-task=4" >> hybrid_job.slurm
+	@echo "#SBATCH --time=00:30:00" >> hybrid_job.slurm
+	@echo "" >> hybrid_job.slurm
+	@echo "export OMP_NUM_THREADS=4" >> hybrid_job.slurm
+	@echo "mpirun ./engine-hybrid 1 7" >> hybrid_job.slurm
+	@echo ""
+	@echo "SLURM job script created: hybrid_job.slurm"
+	@echo "Submit with: sbatch hybrid_job.slurm"
+
+.PHONY: all test-hybrid test-hybrid-deep test-hybrid-single perf-test benchmark clean help slurm-job

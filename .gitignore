@@ -1,0 +1,13 @@
+*.o
+cmake-build-*/
+engine
+.idea/
+.vscode/
+*.md
+!README.md
+
+engine-hybrid
+engine-mpi
+engine-rs
+engine-sht
+engine-rs
